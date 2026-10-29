@@ -1,0 +1,36 @@
+{
+  "name": "AgnoCall-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.5.20",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@ant-design/icons": "^6.1.0",
+    "@apollo/client": "^4.1.5",
+    "@ctrl/tinycolor": "^4.2.0",
+    "antd": "^6.1.0",
+    "dayjs": "^1.11.19",
+    "graphql": "^16.11.0",
+    "graphql-tag": "^2.12.6",
+    "rxjs": "^7.8.1",
+    "wavesurfer.js": "^7.8.6",
+    "swr": "^2.2.5",
+    "lucide-react": "^0.462.0",
+    "recharts": "^2.13.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/react": "^18.3.11",
+    "@types/node": "^22.7.5",
+    "tailwindcss": "^3.4.14",
+    "postcss": "^8.4.47",
+    "autoprefixer": "^10.4.20"
+  }
+}

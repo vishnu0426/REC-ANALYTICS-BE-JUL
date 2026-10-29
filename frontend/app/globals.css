@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: #F7F8FA;
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(47, 111, 237, 0.05), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(18, 128, 90, 0.04), transparent 40%);
+  color: #171B24;
+}
+
+::selection {
+  background: rgba(47, 111, 237, 0.20);
+}
+
+/* visible keyboard focus, respected everywhere */
+:focus-visible {
+  outline: 2px solid #2F6FED;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #E2E5EC;
+  border-radius: 4px;
+}

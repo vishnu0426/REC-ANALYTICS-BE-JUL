@@ -1,0 +1,316 @@
+erDiagram
+    ORGANIZATIONS ||--o{ USERS : has
+    ORGANIZATIONS ||--o{ CALLS : owns
+    ORGANIZATIONS ||--o{ PROVIDER_CONFIGS : configures
+    ORGANIZATIONS ||--o{ COMPLIANCE_RULES : defines
+    ORGANIZATIONS ||--o{ QA_SCORECARD_TEMPLATES : defines
+
+    USERS ||--o{ CALLS : uploads
+    USERS ||--o{ AUDIT_LOGS : generates
+    USERS ||--o{ REPORTS : requests
+    USERS }o--|| ROLES : has
+
+    CALLS ||--o| TRANSCRIPTS : produces
+    CALLS ||--o{ PROCESSING_JOBS : tracked_by
+    CALLS ||--o{ SPEAKERS : contains
+    CALLS ||--o| QA_EVALUATIONS : scored_by
+    CALLS ||--o{ COMPLIANCE_VIOLATIONS : flagged_with
+    CALLS ||--o| SENTIMENT_ANALYSIS : analyzed_for
+    CALLS ||--o| EMOTION_ANALYSIS : analyzed_for
+    CALLS ||--o| CONVERSATION_ANALYTICS : measured_by
+    CALLS ||--o| AGENT_ANALYTICS : measured_by
+    CALLS ||--o| CUSTOMER_ANALYTICS : measured_by
+    CALLS ||--o{ TIMELINE_EVENTS : segmented_by
+    CALLS ||--o{ AI_OBSERVATIONS : generates
+    CALLS ||--o{ RECOMMENDATIONS : generates
+    CALLS ||--o{ ACTION_ITEMS : generates
+    CALLS ||--o{ REPORTS : exported_as
+    CALLS }o--|| AGENTS : performed_by
+
+    TRANSCRIPTS ||--o{ TRANSCRIPT_SEGMENTS : composed_of
+    TRANSCRIPT_SEGMENTS }o--|| SPEAKERS : spoken_by
+
+    QA_EVALUATIONS ||--o{ QA_CRITERIA_SCORES : composed_of
+    QA_CRITERIA_SCORES }o--|| QA_SCORECARD_TEMPLATES : based_on
+
+    COMPLIANCE_VIOLATIONS }o--|| COMPLIANCE_RULES : violates
+
+    AGENTS ||--o{ CALLS : handles
+    AGENTS ||--o{ AGENT_ANALYTICS : aggregated_into
+
+    ORGANIZATIONS {
+        uuid id PK
+        string name
+        string deployment_mode "cloud|air_gapped|hybrid"
+        jsonb settings
+        timestamp created_at
+    }
+
+    USERS {
+        uuid id PK
+        uuid org_id FK
+        string email
+        string name
+        uuid role_id FK
+        timestamp last_login
+        boolean is_active
+    }
+
+    ROLES {
+        uuid id PK
+        string name "qa_manager|supervisor|compliance|analyst|admin"
+        jsonb permissions
+    }
+
+    AGENTS {
+        uuid id PK
+        uuid org_id FK
+        string external_agent_id
+        string name
+        string team
+        timestamp created_at
+    }
+
+    PROVIDER_CONFIGS {
+        uuid id PK
+        uuid org_id FK
+        string provider_type "stt|llm|embedding"
+        string provider_name "whisper|deepgram|openai|anthropic|ollama"
+        jsonb config "endpoint, model, encrypted creds ref"
+        boolean is_active
+    }
+
+    CALLS {
+        uuid id PK
+        uuid org_id FK
+        uuid uploaded_by FK
+        uuid agent_id FK
+        string original_filename
+        string storage_path "MinIO object key"
+        string status "uploaded|validating|processing|processed|failed"
+        string failure_reason
+        int duration_seconds
+        string language
+        timestamp call_date
+        timestamp uploaded_at
+        timestamp processed_at
+        jsonb metadata "call_id_external, campaign, channel"
+    }
+
+    PROCESSING_JOBS {
+        uuid id PK
+        uuid call_id FK
+        string stage "audio|diarization|speech|llm|qa|compliance|analytics|report"
+        string status "queued|running|succeeded|failed|retrying"
+        int attempt_count
+        text error_message
+        timestamp started_at
+        timestamp completed_at
+    }
+
+    SPEAKERS {
+        uuid id PK
+        uuid call_id FK
+        string diarization_label "SPEAKER_00"
+        string role "agent|customer|unknown"
+        float total_talk_seconds
+    }
+
+    TRANSCRIPTS {
+        uuid id PK
+        uuid call_id FK
+        string status
+        boolean pii_masked
+        text full_text_masked
+        text full_text_unmasked "restricted access"
+        timestamp created_at
+    }
+
+    TRANSCRIPT_SEGMENTS {
+        uuid id PK
+        uuid transcript_id FK
+        uuid speaker_id FK
+        int sequence
+        float start_time
+        float end_time
+        text text_masked
+        text text_unmasked
+        float stt_confidence
+    }
+
+    QA_SCORECARD_TEMPLATES {
+        uuid id PK
+        uuid org_id FK
+        string name
+        jsonb criteria_definitions "weights, descriptions"
+        boolean is_active
+    }
+
+    QA_EVALUATIONS {
+        uuid id PK
+        uuid call_id FK
+        uuid template_id FK
+        float overall_score
+        text strengths
+        text weaknesses
+        text coaching_suggestions
+        text improvement_plan
+        string reviewed_by_human FK "nullable, supervisor override"
+        timestamp created_at
+    }
+
+    QA_CRITERIA_SCORES {
+        uuid id PK
+        uuid qa_evaluation_id FK
+        string criterion "greeting|identity_verification|listening|empathy|communication|professionalism|knowledge|resolution|closing"
+        float score
+        text explanation
+        float timestamp_ref
+        text transcript_evidence
+        float confidence
+    }
+
+    COMPLIANCE_RULES {
+        uuid id PK
+        uuid org_id FK
+        string rule_code
+        string category "greeting|identity|consent|disclosure|pci|pii|refund_policy|language"
+        string severity_default "low|medium|high|critical"
+        text rule_logic "natural language rule, compiled to detection prompt"
+        string jurisdiction "nullable"
+        boolean is_active
+    }
+
+    COMPLIANCE_VIOLATIONS {
+        uuid id PK
+        uuid call_id FK
+        uuid rule_id FK
+        string severity
+        float timestamp_ref
+        text explanation
+        text evidence
+        boolean reviewed
+        string review_outcome "confirmed|dismissed|escalated"
+    }
+
+    SENTIMENT_ANALYSIS {
+        uuid id PK
+        uuid call_id FK
+        string overall_sentiment "positive|neutral|negative"
+        string beginning_sentiment
+        string middle_sentiment
+        string end_sentiment
+        jsonb sentiment_timeline "array of {timestamp, score, label}"
+    }
+
+    EMOTION_ANALYSIS {
+        uuid id PK
+        uuid call_id FK
+        jsonb emotion_timeline "array of {timestamp, emotion, confidence}"
+        string dominant_customer_emotion
+        string dominant_agent_emotion
+    }
+
+    CONVERSATION_ANALYTICS {
+        uuid id PK
+        uuid call_id FK
+        int duration_seconds
+        float avg_silence_seconds
+        float longest_silence_seconds
+        float talk_ratio_agent
+        float talk_ratio_customer
+        int interruption_count
+        int questions_asked
+        int questions_answered
+        int hold_count
+        float hold_duration_seconds
+        float avg_response_time_seconds
+        float audio_quality_score
+        float background_noise_score
+        float voice_overlap_seconds
+    }
+
+    AGENT_ANALYTICS {
+        uuid id PK
+        uuid call_id FK
+        uuid agent_id FK
+        float talk_time_seconds
+        float listening_score
+        float confidence_score
+        float empathy_score
+        float communication_score
+        float professionalism_score
+        float knowledge_score
+        int interruption_count
+        float speaking_speed_wpm
+        float avg_response_time_seconds
+        float resolution_score
+    }
+
+    CUSTOMER_ANALYTICS {
+        uuid id PK
+        uuid call_id FK
+        string intent
+        string mood
+        string risk_level "low|medium|high"
+        float repeat_call_probability
+        float escalation_risk
+        float churn_risk
+        float resolution_confidence
+        float csat_prediction
+    }
+
+    TIMELINE_EVENTS {
+        uuid id PK
+        uuid call_id FK
+        string event_type "greeting|verification|issue|investigation|solution|confirmation|closing"
+        float start_time
+        float end_time
+        text description
+    }
+
+    AI_OBSERVATIONS {
+        uuid id PK
+        uuid call_id FK
+        text observation_text
+        float timestamp_ref
+        string category
+    }
+
+    RECOMMENDATIONS {
+        uuid id PK
+        uuid call_id FK
+        string category "immediate_action|coaching|kb_improvement|sop_improvement|follow_up"
+        text recommendation_text
+        string priority "low|medium|high"
+    }
+
+    ACTION_ITEMS {
+        uuid id PK
+        uuid call_id FK
+        text description
+        string owner "agent|supervisor|customer_success"
+        string status "open|in_progress|done"
+        timestamp due_date
+    }
+
+    REPORTS {
+        uuid id PK
+        uuid call_id FK
+        uuid requested_by FK
+        string format "pdf|excel|csv|json|html"
+        string storage_path
+        timestamp generated_at
+    }
+
+    AUDIT_LOGS {
+        uuid id PK
+        uuid org_id FK
+        uuid user_id FK
+        string action
+        string resource_type
+        uuid resource_id
+        jsonb metadata
+        string ip_address
+        timestamp created_at
+    }

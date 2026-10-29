@@ -1,0 +1,87 @@
+flowchart TB
+    subgraph Client["Client Layer"]
+        WEB["Next.js 15 Web App<br/>(Dashboard, Call Detail, Reports)"]
+        API_CLIENT["External API Clients<br/>(Bulk Upload, Integrations)"]
+    end
+
+    subgraph Edge["API Gateway Layer"]
+        GW["FastAPI Gateway<br/>Auth · Rate Limiting · Routing"]
+    end
+
+    subgraph Core["Core Services (FastAPI)"]
+        SVC_CALL["Call Service"]
+        SVC_USER["User/Org Service"]
+        SVC_REPORT["Report Service"]
+        SVC_SEARCH["Search Service"]
+        SVC_SETTINGS["Settings/Provider Config Service"]
+        SVC_AUDIT["Audit Log Service"]
+    end
+
+    subgraph Queue["Message Queue"]
+        MQ["Redis / RabbitMQ<br/>Task Broker"]
+    end
+
+    subgraph Workers["AI Processing Workers (Celery)"]
+        W_AUDIO["Audio Worker<br/>validate · denoise · normalize"]
+        W_DIAR["Diarization Worker<br/>pyannote.audio"]
+        W_SPEECH["Speech Worker<br/>STT provider abstraction"]
+        W_LLM["LLM Worker<br/>summary · intent · root cause"]
+        W_QA["QA Worker<br/>scorecard evaluation"]
+        W_COMPLIANCE["Compliance Worker<br/>violation detection"]
+        W_ANALYTICS["Analytics Worker<br/>sentiment · emotion · metrics"]
+        W_REPORT["Report Worker<br/>PDF/Excel/CSV/JSON/HTML"]
+    end
+
+    subgraph Providers["Provider Abstraction Layer"]
+        direction LR
+        STT_PROV["STT Providers<br/>Whisper/Faster-Whisper (local)<br/>Deepgram/Azure/Google (cloud)"]
+        LLM_PROV["LLM Providers<br/>Ollama (local)<br/>OpenAI/Anthropic/Gemini (cloud)"]
+        EMB_PROV["Embedding Providers<br/>BGE/Nomic (local)<br/>OpenAI/Gemini (cloud)"]
+    end
+
+    subgraph Data["Data Layer"]
+        PG[("PostgreSQL<br/>System of Record")]
+        MINIO[("MinIO<br/>Audio · Reports · Exports")]
+        OS[("OpenSearch<br/>Transcript & Keyword Search")]
+        QD[("Qdrant<br/>Semantic Search<br/>(Phase 2)")]
+    end
+
+    WEB --> GW
+    API_CLIENT --> GW
+    GW --> SVC_CALL
+    GW --> SVC_USER
+    GW --> SVC_REPORT
+    GW --> SVC_SEARCH
+    GW --> SVC_SETTINGS
+    GW -.audit every call.-> SVC_AUDIT
+
+    SVC_CALL -- enqueue job --> MQ
+    MQ --> W_AUDIO --> W_DIAR --> W_SPEECH --> W_LLM
+    W_LLM --> W_QA
+    W_LLM --> W_COMPLIANCE
+    W_LLM --> W_ANALYTICS
+    W_QA --> W_REPORT
+    W_COMPLIANCE --> W_REPORT
+    W_ANALYTICS --> W_REPORT
+
+    W_SPEECH <--> STT_PROV
+    W_LLM <--> LLM_PROV
+    SVC_SEARCH <--> EMB_PROV
+
+    W_AUDIO --> MINIO
+    W_SPEECH --> PG
+    W_DIAR --> PG
+    W_QA --> PG
+    W_COMPLIANCE --> PG
+    W_ANALYTICS --> PG
+    W_REPORT --> MINIO
+    SVC_CALL --> PG
+    SVC_AUDIT --> PG
+    SVC_SEARCH --> OS
+    SVC_SEARCH -.phase 2.-> QD
+
+    SVC_SETTINGS -- deployment mode:<br/>cloud / air-gapped / hybrid --> Providers
+
+    style Providers fill:#2d3748,color:#fff
+    style Data fill:#1a365d,color:#fff
+    style Workers fill:#2c5282,color:#fff

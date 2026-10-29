@@ -1,0 +1,826 @@
+openapi: 3.0.3
+info:
+  title: Enterprise AI Call Recording Analysis Platform API
+  version: "1.0.0"
+  description: >
+    API surface for uploading recorded calls, tracking processing, and retrieving
+    AI-generated transcripts, QA scorecards, compliance findings, analytics, and reports.
+    This is not a telephony API — no live-call or dialing endpoints exist here.
+
+servers:
+  - url: https://{host}/api/v1
+    variables:
+      host:
+        default: api.example.internal
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Calls
+  - name: Processing
+  - name: Transcript
+  - name: QA
+  - name: Compliance
+  - name: Sentiment
+  - name: Analytics
+  - name: Recommendations
+  - name: Search
+  - name: Reports
+  - name: Dashboard
+  - name: Settings
+  - name: Audit
+
+paths:
+
+  /calls:
+    post:
+      tags: [Calls]
+      summary: Upload a single recorded call
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                agent_external_id:
+                  type: string
+                call_date:
+                  type: string
+                  format: date-time
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "202":
+          description: Call accepted and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallAccepted"
+    get:
+      tags: [Calls]
+      summary: List calls with filters
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [uploaded, validating, processing, processed, failed] }
+        - name: agent_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: risk_level
+          in: query
+          schema: { type: string, enum: [low, medium, high] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        "200":
+          description: Paginated list of calls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallListResponse"
+
+  /calls/bulk:
+    post:
+      tags: [Calls]
+      summary: Bulk upload calls (folder/zip or list of pre-signed object references)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      storage_ref: { type: string }
+                      agent_external_id: { type: string }
+                      call_date: { type: string, format: date-time }
+      responses:
+        "202":
+          description: Batch accepted; individual call IDs returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id: { type: string, format: uuid }
+                  call_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+
+  /calls/{call_id}:
+    get:
+      tags: [Calls]
+      summary: Get call detail (status, metadata, links to sub-resources)
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Call detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallDetail"
+    delete:
+      tags: [Calls]
+      summary: Delete a call and all derived analysis (GDPR/right-to-erasure)
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "204": { description: Deleted }
+
+  /calls/{call_id}/audio:
+    get:
+      tags: [Calls]
+      summary: Stream/download the original audio (pre-signed MinIO redirect)
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "302": { description: Redirect to pre-signed audio URL }
+
+  /calls/{call_id}/reprocess:
+    post:
+      tags: [Processing]
+      summary: Re-run the pipeline (or a specific stage) for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stage:
+                  type: string
+                  enum: [audio, diarization, speech, llm, qa, compliance, analytics, report, all]
+                  default: all
+      responses:
+        "202": { description: Reprocessing queued }
+
+  /calls/{call_id}/jobs:
+    get:
+      tags: [Processing]
+      summary: Get per-stage processing job status for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: List of processing jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProcessingJob"
+
+  /calls/{call_id}/transcript:
+    get:
+      tags: [Transcript]
+      summary: Get the full timestamped, speaker-labeled transcript
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+        - name: unmask_pii
+          in: query
+          schema: { type: boolean, default: false }
+          description: Requires elevated permission; audited on every use.
+      responses:
+        "200":
+          description: Transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcript"
+
+  /calls/{call_id}/timeline:
+    get:
+      tags: [Analytics]
+      summary: Get conversation timeline (greeting/verification/issue/.../closing)
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimelineEvent"
+
+  /calls/{call_id}/qa:
+    get:
+      tags: [QA]
+      summary: Get QA scorecard for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: QA evaluation with per-criterion evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QAEvaluation"
+    patch:
+      tags: [QA]
+      summary: Supervisor override of AI-generated QA score
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                criterion: { type: string }
+                overridden_score: { type: number }
+                reason: { type: string }
+      responses:
+        "200": { description: Override recorded, audit-logged }
+
+  /calls/{call_id}/compliance:
+    get:
+      tags: [Compliance]
+      summary: Get compliance violations for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: List of violations with evidence
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComplianceViolation"
+
+  /calls/{call_id}/compliance/{violation_id}/review:
+    post:
+      tags: [Compliance]
+      summary: Confirm, dismiss, or escalate a flagged violation
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+        - name: violation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outcome: { type: string, enum: [confirmed, dismissed, escalated] }
+                notes: { type: string }
+      responses:
+        "200": { description: Review recorded, audit-logged }
+
+  /calls/{call_id}/sentiment:
+    get:
+      tags: [Sentiment]
+      summary: Get sentiment breakdown and timeline
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Sentiment analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SentimentAnalysis"
+
+  /calls/{call_id}/emotion:
+    get:
+      tags: [Sentiment]
+      summary: Get emotion timeline
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Emotion analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionAnalysis"
+
+  /calls/{call_id}/analytics:
+    get:
+      tags: [Analytics]
+      summary: Get conversation, agent, and customer analytics for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Combined analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallAnalytics"
+
+  /calls/{call_id}/observations:
+    get:
+      tags: [Analytics]
+      summary: Get AI-generated observations for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: List of observations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIObservation"
+
+  /calls/{call_id}/recommendations:
+    get:
+      tags: [Recommendations]
+      summary: Get AI-generated recommendations and action items
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Recommendations and action items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecommendationsBundle"
+
+  /calls/{call_id}/reports:
+    post:
+      tags: [Reports]
+      summary: Generate a report export for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format: { type: string, enum: [pdf, excel, csv, json, html] }
+                include_unmasked_pii: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Report generation queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report_id: { type: string, format: uuid }
+    get:
+      tags: [Reports]
+      summary: List reports generated for a call
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: List of reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Report"
+
+  /reports/{report_id}/download:
+    get:
+      tags: [Reports]
+      summary: Download a generated report
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "302": { description: Redirect to pre-signed download URL }
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Global AI search across calls (natural language or structured)
+      description: >
+        Supports queries like "show angry customers", "empathy below 80",
+        "unresolved calls mentioning competitors". Resolves to a combination
+        of OpenSearch lexical filters and, where semantic similarity is needed,
+        Qdrant vector search.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResults"
+
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Top-level dashboard metrics
+      parameters:
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Dashboard summary cards + recent activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /settings/providers:
+    get:
+      tags: [Settings]
+      summary: List configured STT/LLM/embedding providers for the org
+      responses:
+        "200":
+          description: Provider configs (deployment-mode filtered)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderConfig"
+    put:
+      tags: [Settings]
+      summary: Update active provider selection (admin only)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConfig"
+      responses:
+        "200": { description: Updated }
+
+  /settings/compliance-rules:
+    get:
+      tags: [Settings]
+      summary: List compliance rules
+      responses:
+        "200":
+          description: Compliance rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ComplianceRule"
+    post:
+      tags: [Settings]
+      summary: Create a compliance rule (natural-language rule text)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComplianceRule"
+      responses:
+        "201": { description: Created }
+
+  /audit-logs:
+    get:
+      tags: [Audit]
+      summary: Query audit logs (compliance/admin only)
+      parameters:
+        - name: user_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CallId:
+      name: call_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    CallAccepted:
+      type: object
+      properties:
+        call_id: { type: string, format: uuid }
+        status: { type: string, example: uploaded }
+
+    CallListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CallSummary" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+
+    CallSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        agent_name: { type: string }
+        duration_seconds: { type: integer }
+        call_date: { type: string, format: date-time }
+        overall_qa_score: { type: number, nullable: true }
+        compliance_violation_count: { type: integer }
+        risk_level: { type: string, enum: [low, medium, high], nullable: true }
+
+    CallDetail:
+      allOf:
+        - $ref: "#/components/schemas/CallSummary"
+        - type: object
+          properties:
+            original_filename: { type: string }
+            language: { type: string }
+            metadata: { type: object, additionalProperties: true }
+            uploaded_at: { type: string, format: date-time }
+            processed_at: { type: string, format: date-time, nullable: true }
+            failure_reason: { type: string, nullable: true }
+
+    ProcessingJob:
+      type: object
+      properties:
+        stage: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, retrying] }
+        attempt_count: { type: integer }
+        error_message: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+
+    Transcript:
+      type: object
+      properties:
+        call_id: { type: string, format: uuid }
+        pii_masked: { type: boolean }
+        segments:
+          type: array
+          items:
+            type: object
+            properties:
+              sequence: { type: integer }
+              speaker_role: { type: string, enum: [agent, customer, unknown] }
+              start_time: { type: number }
+              end_time: { type: number }
+              text: { type: string }
+              stt_confidence: { type: number }
+
+    TimelineEvent:
+      type: object
+      properties:
+        event_type: { type: string }
+        start_time: { type: number }
+        end_time: { type: number }
+        description: { type: string }
+
+    QAEvaluation:
+      type: object
+      properties:
+        overall_score: { type: number }
+        strengths: { type: string }
+        weaknesses: { type: string }
+        coaching_suggestions: { type: string }
+        improvement_plan: { type: string }
+        criteria:
+          type: array
+          items:
+            type: object
+            properties:
+              criterion: { type: string }
+              score: { type: number }
+              explanation: { type: string }
+              timestamp_ref: { type: number }
+              transcript_evidence: { type: string }
+              confidence: { type: number }
+
+    ComplianceViolation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        rule_code: { type: string }
+        category: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        timestamp_ref: { type: number }
+        explanation: { type: string }
+        evidence: { type: string }
+        reviewed: { type: boolean }
+        review_outcome: { type: string, nullable: true }
+
+    SentimentAnalysis:
+      type: object
+      properties:
+        overall_sentiment: { type: string }
+        beginning_sentiment: { type: string }
+        middle_sentiment: { type: string }
+        end_sentiment: { type: string }
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp: { type: number }
+              score: { type: number }
+              label: { type: string }
+
+    EmotionAnalysis:
+      type: object
+      properties:
+        dominant_customer_emotion: { type: string }
+        dominant_agent_emotion: { type: string }
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp: { type: number }
+              emotion: { type: string }
+              confidence: { type: number }
+
+    CallAnalytics:
+      type: object
+      properties:
+        conversation:
+          type: object
+          properties:
+            duration_seconds: { type: integer }
+            avg_silence_seconds: { type: number }
+            longest_silence_seconds: { type: number }
+            talk_ratio_agent: { type: number }
+            talk_ratio_customer: { type: number }
+            interruption_count: { type: integer }
+            questions_asked: { type: integer }
+            questions_answered: { type: integer }
+            hold_count: { type: integer }
+            hold_duration_seconds: { type: number }
+            audio_quality_score: { type: number }
+        agent:
+          type: object
+          properties:
+            talk_time_seconds: { type: number }
+            empathy_score: { type: number }
+            communication_score: { type: number }
+            professionalism_score: { type: number }
+            knowledge_score: { type: number }
+            speaking_speed_wpm: { type: number }
+            resolution_score: { type: number }
+        customer:
+          type: object
+          properties:
+            intent: { type: string }
+            mood: { type: string }
+            risk_level: { type: string }
+            repeat_call_probability: { type: number }
+            escalation_risk: { type: number }
+            churn_risk: { type: number }
+            csat_prediction: { type: number }
+
+    AIObservation:
+      type: object
+      properties:
+        observation_text: { type: string }
+        timestamp_ref: { type: number }
+        category: { type: string }
+
+    RecommendationsBundle:
+      type: object
+      properties:
+        recommendations:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string }
+              text: { type: string }
+              priority: { type: string }
+        action_items:
+          type: array
+          items:
+            type: object
+            properties:
+              description: { type: string }
+              owner: { type: string }
+              status: { type: string }
+              due_date: { type: string, format: date-time, nullable: true }
+
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        format: { type: string }
+        generated_at: { type: string, format: date-time }
+        download_url: { type: string }
+
+    SearchResults:
+      type: object
+      properties:
+        interpreted_query:
+          type: object
+          description: How the natural-language query was parsed into filters
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/CallSummary" }
+        total: { type: integer }
+
+    DashboardSummary:
+      type: object
+      properties:
+        total_calls: { type: integer }
+        processed: { type: integer }
+        processing: { type: integer }
+        failed: { type: integer }
+        average_qa: { type: number }
+        compliance_percent: { type: number }
+        average_sentiment: { type: number }
+        high_risk_calls: { type: integer }
+        top_complaint_categories:
+          type: array
+          items: { type: string }
+        top_keywords:
+          type: array
+          items: { type: string }
+        top_agents:
+          type: array
+          items:
+            type: object
+            properties:
+              agent_name: { type: string }
+              avg_qa_score: { type: number }
+
+    ProviderConfig:
+      type: object
+      properties:
+        provider_type: { type: string, enum: [stt, llm, embedding] }
+        provider_name: { type: string }
+        is_active: { type: boolean }
+        config: { type: object, additionalProperties: true }
+
+    ComplianceRule:
+      type: object
+      properties:
+        rule_code: { type: string }
+        category: { type: string }
+        severity_default: { type: string }
+        rule_logic: { type: string, description: "Natural-language rule text" }
+        jurisdiction: { type: string, nullable: true }
+        is_active: { type: boolean }
+
+    AuditLogEntry:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string, format: uuid }
+        ip_address: { type: string }
+        created_at: { type: string, format: date-time }

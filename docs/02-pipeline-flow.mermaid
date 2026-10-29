@@ -1,0 +1,64 @@
+flowchart TD
+    START(["Call Uploaded"]) --> VALIDATE["Audio Validation<br/>format · duration · corruption check"]
+
+    VALIDATE -->|invalid| FAIL_EARLY["Status: FAILED<br/>reason logged, user notified"]
+    VALIDATE -->|valid| STORE_RAW["Store raw audio in MinIO<br/>(encrypted at rest)"]
+
+    STORE_RAW --> DENOISE["Noise Reduction<br/>normalize levels, remove hiss/hum"]
+    DENOISE --> DIARIZE["Speaker Diarization<br/>pyannote.audio<br/>→ segments labeled Speaker A/B"]
+
+    DIARIZE --> LANGDETECT["Language Detection<br/>per-segment or whole-call"]
+    LANGDETECT --> STT["Speech-to-Text<br/>provider-abstracted<br/>(Whisper/Deepgram/Azure/Google)"]
+
+    STT --> ALIGN["Timestamp Alignment<br/>merge diarization + STT segments"]
+    ALIGN --> TRANSCRIPT["Transcript Generation<br/>speaker-labeled, timestamped"]
+
+    TRANSCRIPT --> PII["PII Detection & Masking<br/>card numbers, SSNs, account IDs<br/>→ masked transcript + unmasked (restricted access)"]
+
+    PII --> ROLE_ID{"Agent vs Customer<br/>role identification"}
+    ROLE_ID --> LLM_ANALYSIS["LLM Analysis Pass<br/>summary · intent · topic ·<br/>keywords · root cause · outcome"]
+
+    LLM_ANALYSIS --> PARALLEL_FORK{ }
+
+    PARALLEL_FORK --> QA["QA Evaluation<br/>9-criteria scorecard<br/>+ evidence + confidence"]
+    PARALLEL_FORK --> COMPLIANCE["Compliance Evaluation<br/>rule engine + LLM violation detection"]
+    PARALLEL_FORK --> SENTIMENT["Sentiment Analysis<br/>beginning/middle/end + timeline"]
+    PARALLEL_FORK --> EMOTION["Emotion Detection<br/>8-class timeline"]
+
+    QA --> CONV_ANALYTICS["Conversation Analytics<br/>talk ratio, silence, interruptions,<br/>hold time, audio quality"]
+    COMPLIANCE --> CONV_ANALYTICS
+    SENTIMENT --> CONV_ANALYTICS
+    EMOTION --> CONV_ANALYTICS
+
+    CONV_ANALYTICS --> BIZ_ANALYTICS["Business Analytics<br/>risk level, churn risk,<br/>repeat-call probability, CSAT prediction"]
+
+    BIZ_ANALYTICS --> TIMELINE["Conversation Timeline Detection<br/>greeting → verification → issue →<br/>investigation → solution → confirmation → closing"]
+
+    TIMELINE --> OBSERVATIONS["AI Observations Generation"]
+    OBSERVATIONS --> RECOMMENDATIONS["AI Recommendations<br/>immediate actions · coaching ·<br/>KB gaps · SOP gaps · follow-ups"]
+
+    RECOMMENDATIONS --> INDEX["Index for Search<br/>OpenSearch (lexical)<br/>Qdrant (semantic, phase 2)"]
+
+    INDEX --> REPORT["Report Generation<br/>PDF/Excel/CSV/JSON/HTML"]
+    REPORT --> DONE(["Status: PROCESSED<br/>notify user, update dashboard"])
+
+    VALIDATE -.owner.-> W1["Audio Worker"]
+    DENOISE -.owner.-> W1
+    DIARIZE -.owner.-> W2["Diarization Worker"]
+    LANGDETECT -.owner.-> W3["Speech Worker"]
+    STT -.owner.-> W3
+    ALIGN -.owner.-> W3
+    PII -.owner.-> W3
+    LLM_ANALYSIS -.owner.-> W4["LLM Worker"]
+    QA -.owner.-> W5["QA Worker"]
+    COMPLIANCE -.owner.-> W6["Compliance Worker"]
+    SENTIMENT -.owner.-> W7["Analytics Worker"]
+    EMOTION -.owner.-> W7
+    CONV_ANALYTICS -.owner.-> W7
+    BIZ_ANALYTICS -.owner.-> W7
+    REPORT -.owner.-> W8["Report Worker"]
+
+    classDef failState fill:#742a2a,color:#fff
+    classDef workerNote fill:#2d3748,color:#a0aec0,stroke-dasharray: 3 3
+    class FAIL_EARLY failState
+    class W1,W2,W3,W4,W5,W6,W7,W8 workerNote

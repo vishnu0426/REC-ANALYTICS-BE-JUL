@@ -1,0 +1,188 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: agnocall
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: backend
+
+  template:
+    metadata:
+      labels:
+        app: backend
+
+    spec:
+      imagePullSecrets:
+      - name: regcred
+
+      # LLM analysis + ffmpeg encoding can run well past 30s; give the
+      # worker container time to finish an in-flight call instead of being
+      # SIGKILLed mid-task on a rollout or scale-down.
+      terminationGracePeriodSeconds: 90
+
+      containers:
+      - name: backend
+        image: agnocon/agnoshinimages:agnocall-be-1
+        imagePullPolicy: Always
+
+        # Config/credentials come from the .env file baked into the image
+        # at build time (backend/.env, no longer excluded via
+        # .dockerignore) — read by pydantic-settings at startup. No
+        # ConfigMap/Secret wired up here; rotating any value means
+        # rebuilding and redeploying the image.
+        ports:
+        - containerPort: 8000
+
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+
+      # Same image as the api container above — only the command differs.
+      # See backend/Dockerfile: the image's default CMD is uvicorn; this
+      # container overrides it to run the Celery worker instead. Both
+      # containers share this one Pod, so they scale and restart together;
+      # split into a separate Deployment later if worker load needs to
+      # scale independently of API traffic.
+      #
+      # Only consumes gpu-heavy/cpu-io now — priority-reprocess moved to the
+      # dedicated worker-priority Deployment below. Under load (see
+      # backend/scripts/load_test.py --stage real results) a single LLM
+      # analysis stage on cpu-io took 10-14s; sharing one worker process
+      # meant priority-reprocess tasks (including the 1s-scheduled
+      # sync_call_records beat task) queued up behind that — up to 11
+      # pending at once — instead of actually being isolated by queue name
+      # alone. A separate pod gives real isolation (its own CPU/scheduling),
+      # not just a separate queue label consumed by the same process.
+      - name: worker
+        image: agnocon/agnoshinimages:agnocall-be-1
+        imagePullPolicy: Always
+
+        command: ["celery"]
+        args:
+          - "-A"
+          - "app.tasks.celery_app"
+          - "worker"
+          - "--loglevel=info"
+          - "-Q"
+          - "gpu-heavy,cpu-io"
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+
+        # No HTTP endpoint to probe — `celery inspect ping` is the standard
+        # way to confirm the worker process is actually alive and consuming
+        # tasks, not just that the container hasn't crashed. Pings whichever
+        # worker(s) answer; fine while replicas: 1 means there's only one to
+        # possibly answer. If you ever scale this Deployment beyond 1
+        # replica, this stops being per-pod-specific — switch to targeting
+        # `celery@<pod-name>` via the downward API at that point.
+        livenessProbe:
+          exec:
+            command:
+              - "celery"
+              - "-A"
+              - "app.tasks.celery_app"
+              - "inspect"
+              - "ping"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+
+---
+# Dedicated, separate pod for priority-reprocess — deliberately its own
+# Deployment rather than a third container in the pod above, so its
+# CPU/scheduling is never contended by the heavy gpu-heavy/cpu-io worker or
+# the API process. Also owns Celery Beat (-B): sync_call_records enqueues
+# onto exactly this queue, so beat lives with the worker that actually
+# drains it promptly. Keep this at replicas: 1 — scaling it up would
+# duplicate beat's schedule (see the -B comment that used to live on the
+# worker container above).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-priority
+  namespace: agnocall
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: worker-priority
+
+  template:
+    metadata:
+      labels:
+        app: worker-priority
+
+    spec:
+      imagePullSecrets:
+      - name: regcred
+
+      terminationGracePeriodSeconds: 90
+
+      containers:
+      - name: worker-priority
+        image: agnocon/agnoshinimages:agnocall-be-1
+        imagePullPolicy: Always
+
+        command: ["celery"]
+        args:
+          - "-A"
+          - "app.tasks.celery_app"
+          - "worker"
+          - "--loglevel=info"
+          - "-B"
+          - "-Q"
+          - "priority-reprocess"
+          - "--concurrency=2"
+
+        # priority-reprocess tasks are small/fast reprocess jobs, not
+        # LLM/STT calls — this pod doesn't need the same headroom as worker.
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        livenessProbe:
+          exec:
+            command:
+              - "celery"
+              - "-A"
+              - "app.tasks.celery_app"
+              - "inspect"
+              - "ping"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10

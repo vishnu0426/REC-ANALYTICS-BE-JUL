@@ -1,0 +1,54 @@
+# --- Secrets (real keys/passwords live here; commit only *.example) ---
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Celery beat state ---
+celerybeat-schedule*
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- User-uploaded / generated data ---
+uploads/
+backend/public/uploads/
+*.wav
+*.mp3
+*.flac
+*.m4a
+
+# --- Logs & temp ---
+*.log
+tmp/
+.cache/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Claude Code local settings ---
+.claude/settings.local.json
